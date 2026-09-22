@@ -1,31 +1,51 @@
-from dataclasses import dataclass
+import numpy as np
+from ultralytics import YOLO
+
+from src import config
+from src.models.detection import Detection
 
 
-@dataclass(frozen=True)
-class Detection:
-    class_id: int
-    class_name: str
-    confidence: float
-    x1: int
-    y1: int
-    x2: int
-    y2: int
+class Detector:
+	def __init__(
+		self,
+		model_path: str = str(config.MODEL_PATH),
+		confidence: float = config.CONFIDENCE_THRESHOLD,
+		iou: float = config.IOU_THRESHOLD,
+		classes_of_interest: set[str] | None = None,
+	) -> None:
+		self.model = YOLO(model_path)
+		self.confidence = confidence
+		self.iou = iou
+		self.class_names = self.model.names
+		self.classes_of_interest = classes_of_interest
 
-    @property
-    def width(self) -> int:
-        return self.x2 - self.x1
+	def detect(self, frame: np.ndarray) -> list[Detection]:
+		results = self.model.predict(
+			frame,
+			conf=self.confidence,
+			iou=self.iou,
+			verbose=False,
+		)
+		detections: list[Detection] = []
 
-    @property
-    def height(self) -> int:
-        return self.y2 - self.y1
+		for result in results:
+			for box in result.boxes:
+				class_id = int(box.cls[0])
+				class_name = self.class_names[class_id]
+				if self.classes_of_interest and class_name not in self.classes_of_interest:
+					continue
 
-    @property
-    def center(self) -> tuple[int, int]:
-        return ((self.x1 + self.x2) // 2, (self.y1 + self.y2) // 2)
+				x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+				detections.append(
+					Detection(
+						class_id=class_id,
+						class_name=class_name,
+						confidence=float(box.conf[0]),
+						x1=x1,
+						y1=y1,
+						x2=x2,
+						y2=y2,
+					)
+				)
 
-    @property
-    def area(self) -> int:
-        return self.width * self.height
-
-    def __str__(self) -> str:
-        return f"{self.class_name} ({self.confidence:.2f}) @ [{self.x1},{self.y1},{self.x2},{self.y2}]"
+		return detections
